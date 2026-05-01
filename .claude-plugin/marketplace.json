@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "kirilxd-plugins",
+  "owner": {
+    "name": "kirilxd"
+  },
+  "plugins": [
+    {
+      "name": "swe-interview-coach",
+      "version": "1.0.0",
+      "source": {"source": "github", "repo": "kirilxd/swe-interview-coach"},
+      "description": "SWE interview prep — behavioral (STAR story bank, company-tailored mocks, debriefs), system design (canonical walkthroughs, graded mocks on a local Excalidraw canvas), and coding (DSA walkthroughs, graded mocks with a local test harness that runs your code, drills, LeetCode import)"
+    }
+  ]
+}

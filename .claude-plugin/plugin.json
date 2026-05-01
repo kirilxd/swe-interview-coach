@@ -1,0 +1,10 @@
+{
+  "name": "swe-interview-coach",
+  "version": "1.0.0",
+  "description": "SWE interview prep — behavioral (STAR story bank, company-tailored mocks, delivery drills, debriefs), system design (canonical walkthroughs, graded mocks on a shared local Excalidraw canvas, practice sessions, real-interview debriefs), and coding (DSA pattern walkthroughs, guided practice, graded mocks with a local test harness that runs your code, rapid drills, real-interview debriefs, optional LeetCode import). Canvas runs on localhost via a tiny bundled Node script and the test harness is bundled Python stdlib — no MCP, no npm install. State lives in markdown files inside the user's working dir.",
+  "author": {
+    "name": "kirilxd"
+  },
+  "license": "MIT",
+  "keywords": ["interview", "behavioral", "star", "career", "preparation", "system-design", "excalidraw", "coding", "algorithms", "dsa", "leetcode"]
+}

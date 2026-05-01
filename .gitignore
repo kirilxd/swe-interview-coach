@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Claude Code local
+.claude/settings.local.json
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Python bytecode (test harness adapter)
+__pycache__/
+*.pyc
+
+# Local-only docs (specs, plans, internal notes)
+docs/

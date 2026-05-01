@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>swe-interview-coach · sysdesign canvas</title>
+  <link rel="stylesheet" href="https://esm.sh/@excalidraw/excalidraw@0.18.0/dist/prod/index.css" />
+  <style>
+    html, body, #root { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+    #status { position: fixed; bottom: 8px; right: 12px; font-size: 11px; color: #888; z-index: 9999; background: rgba(255,255,255,0.85); padding: 4px 8px; border-radius: 4px; pointer-events: none; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.3.1",
+        "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+        "react-dom": "https://esm.sh/react-dom@18.3.1",
+        "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+        "@excalidraw/excalidraw": "https://esm.sh/@excalidraw/excalidraw@0.18.0?external=react,react-dom"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="status">connecting…</div>
+  <script type="module">
+    import React, { useEffect, useRef, useCallback } from "react";
+    import { createRoot } from "react-dom/client";
+    import { Excalidraw, restoreElements } from "@excalidraw/excalidraw";
+
+    const POLL_MS = 500;
+    const POST_DEBOUNCE_MS = 300;
+    const statusEl = document.getElementById("status");
+    function setStatus(text) { if (statusEl) statusEl.textContent = text; }
+
+    const VOLATILE_KEYS = new Set(["version", "versionNonce", "updated", "seed"]);
+    function sceneHash(scene) {
+      try {
+        const els = (scene?.elements ?? []).map((el) => {
+          const out = {};
+          for (const k of Object.keys(el).sort()) {
+            if (!VOLATILE_KEYS.has(k)) out[k] = el[k];
+          }
+          return out;
+        });
+        return JSON.stringify({ els, bg: scene?.appState?.viewBackgroundColor ?? "#ffffff" });
+      } catch { return "HASH_ERROR"; }
+    }
+
+    function debounce(fn, ms) {
+      let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+    }
+
+    // --- text fitting: Excalidraw trusts stored text width/height and never
+    // re-measures on load, so LLM-guessed dims clip. Measure real glyph size
+    // and correct dims; for bound labels, grow the container to fit. Idempotent.
+    const BOUND_TEXT_PADDING = 5;
+    // Family names must match the faces Excalidraw actually registers
+    // (verified in-browser: hand-drawn = Excalifont, code = Cascadia).
+    const FONT_STACK = {
+      1: 'Excalifont, Virgil, "Segoe UI Emoji", sans-serif',
+      2: 'Nunito, Helvetica, Arial, sans-serif',
+      3: 'Cascadia, "Comic Shanns", "Cascadia Code", monospace',
+    };
+    // Excalidraw lazy-loads these faces, so document.fonts.ready can resolve
+    // BEFORE they exist and a measurement then falls back to a narrower system
+    // font (boxes come out too small → labels clip). Explicitly load the faces
+    // and signal when measurement is safe.
+    const FIT_FONTS = ["16px Excalifont", "16px Cascadia", "16px Nunito"];
+    function loadFitFonts() {
+      if (!document.fonts || !document.fonts.load) return Promise.resolve();
+      return Promise.all(FIT_FONTS.map((f) => document.fonts.load(f).catch(() => {})));
+    }
+    const _measureCanvas = document.createElement("canvas");
+    const _measureCtx = _measureCanvas.getContext("2d");
+    function measureText(el) {
+      const fs = el.fontSize || 16;
+      _measureCtx.font = `${fs}px ${FONT_STACK[el.fontFamily] || FONT_STACK[1]}`;
+      const lines = String(el.text ?? "").split("\n");
+      let maxW = 0;
+      for (const ln of lines) maxW = Math.max(maxW, _measureCtx.measureText(ln).width);
+      const lineHeight = el.lineHeight || 1.25;
+      return { w: Math.ceil(maxW), h: Math.ceil(lines.length * fs * lineHeight) };
+    }
+    function fitTextDimensions(elements) {
+      const out = elements.map((e) => ({ ...e }));
+      const byId = Object.fromEntries(out.map((e) => [e.id, e]));
+      for (const e of out) {
+        if (e.type !== "text") continue;
+        const m = measureText(e);
+        const container = e.containerId ? byId[e.containerId] : null;
+        if (container) {
+          // bound label: grow the container to fit, wrap text to inner width
+          container.width = Math.max(container.width || 0, m.w + 2 * BOUND_TEXT_PADDING + 12);
+          container.height = Math.max(container.height || 0, m.h + 2 * BOUND_TEXT_PADDING + 8);
+          e.width = container.width - 2 * BOUND_TEXT_PADDING;
+          e.height = m.h;
+        } else {
+          // standalone text / free annotation: size to content
+          e.width = m.w + 2;
+          e.height = m.h;
+        }
+      }
+      return out;
+    }
+
+    function App() {
+      const apiRef = useRef(null);
+      const lastSyncedHashRef = useRef("");
+
+      const postScene = useRef(debounce(async (elements, appState) => {
+        const scene = { elements, appState: { viewBackgroundColor: appState?.viewBackgroundColor ?? "#ffffff" } };
+        const h = sceneHash(scene);
+        if (h === "HASH_ERROR" || h === lastSyncedHashRef.current) return;
+        try {
+          const r = await fetch("/api/canvas.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(scene) });
+          if (!r.ok) throw new Error("post failed");
+          lastSyncedHashRef.current = h;
+          setStatus("synced");
+        } catch { setStatus("offline"); }
+      }, POST_DEBOUNCE_MS)).current;
+
+      const onChange = useCallback((elements, appState) => {
+        postScene(elements, appState);
+      }, [postScene]);
+
+      useEffect(() => {
+        let cancelled = false;
+        async function poll() {
+          if (cancelled) return;
+          try {
+            const r = await fetch("/api/canvas.json", { cache: "no-store" });
+            if (r.ok) {
+              const scene = await r.json();
+              const h = sceneHash(scene);
+              if (h !== lastSyncedHashRef.current && apiRef.current) {
+                lastSyncedHashRef.current = h;
+                try {
+                  apiRef.current.updateScene({ elements: fitTextDimensions(restoreElements(scene.elements || [], null)), appState: scene.appState || {} });
+                  setStatus("synced");
+                } catch { setStatus("bad scene"); }
+              } else { setStatus("synced"); }
+            } else { setStatus("server " + r.status); }
+          } catch { setStatus("disconnected"); }
+          setTimeout(poll, POLL_MS);
+        }
+        // Once the real measurement fonts are loaded, force one re-apply so
+        // text dims are recomputed with correct glyph metrics (not fallback).
+        loadFitFonts().then(() => { lastSyncedHashRef.current = ""; });
+        poll();
+        return () => { cancelled = true; };
+      }, []);
+
+      return React.createElement(Excalidraw, {
+        excalidrawAPI: (api) => { apiRef.current = api; window.__excalidrawAPI = api; setStatus("ready"); },
+        onChange,
+        initialData: { elements: [], appState: { viewBackgroundColor: "#ffffff" } },
+      });
+    }
+
+    createRoot(document.getElementById("root")).render(React.createElement(App));
+  </script>
+</body>
+</html>
